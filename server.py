@@ -1,6 +1,8 @@
-from flask import Flask, render_template, request, session, url_for
-from werkzeug.utils import redirect
+from flask import Flask, render_template, request, session, url_for, escape
+from werkzeug.utils import redirect, escape
 import pymysql
+
+import hashlib
 
 #在本地可以连接到MySQL server,放到docker上就不行了，查下怎么设置，参数，环境等等
 db = pymysql.connect(host='localhost',user='root',charset='utf8mb4',cursorclass=pymysql.cursors.DictCursor)
@@ -8,30 +10,34 @@ db = pymysql.connect(host='localhost',user='root',charset='utf8mb4',cursorclass=
 cur = db.cursor()
 cur.execute("create database IF NOT EXISTS zhong")
 cur.execute("use zhong")
-cur.execute("create table IF NOT EXISTS user(username varchar(20), password varchar(20));")
+cur.execute("create table IF NOT EXISTS user(username varchar(50), password varchar(300));")
 #cur.execute("insert into user values(\"zhongai\",\"abc\")")
 db.commit()
 
 print("database and table created: success")
 
 app = Flask(__name__)
-
+app.secret_key = b'fjasldf;jlasfj#jfadlDJL23@ljfasljAi'
 @app.route('/')
 def hello_world():
-    return "hello, world!"
+    if 'username' in session:
+        return "logged in as %s " % escape(session['username'])
+    return "please logged in!"
 
 @app.route('/index')
 def index():
     return render_template('index.html')
 
+#https://dormousehole.readthedocs.io/en/latest/quickstart.html#quickstart
 @app.route('/login', methods=['POST','GET'])
-def loging():
+def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-
+        session['username']=username
         print("username: " + username)
         print("password: " + password)
+        print("session username: " + session['username'])
         #一些判断语句验证，1：用户名是否存在 2：密码是否正确
         sql = "select * from user where username = (%s)"
         cur.execute(sql,(username))
@@ -41,12 +47,20 @@ def loging():
         print("login name:" + name['username'])
 
         print(name)
-        if name['password'] == password:
+        h = hashlib.sha256(password.encode())
+        print("hashed password: " + h.hexdigest())
+        if name['password'] == h.hexdigest():
             return "成功登入，欢迎回来： " + username
         else:
             return "登入失败, 用户："+username+" 密码错误"
 
     return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.pop('username',None)
+    return redirect(url_for('hello_world'))
+
 
 
 @app.route('/register', methods=['POST','GET'])
@@ -58,6 +72,11 @@ def register():
         print("username: " + username)
         print("password: " + password)
         print("password_check: " + password_check)
+        h = hashlib.sha256(password.encode())
+        print("hashed hex  password: " + h.hexdigest())
+
+
+
 
         #一些判断语句，比如输入空白提示，2次密码不同提示，用户名重复提示等等
         sql = "select * from user where username = (%s)"
@@ -71,9 +90,11 @@ def register():
         elif ex == 0:
             return "注册失败，username \""+username+ "\" existed."
 
+
+
         #新用户添加到database
         sql = "insert into user values (%s,%s)"
-        cur.execute(sql,(username,password))
+        cur.execute(sql,(username,h.hexdigest()))
         db.commit()
         return "注册成功，欢迎新用户: "+username
         #return render_template('register.html', rep=username,title="欢迎登入")
